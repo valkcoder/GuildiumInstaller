@@ -1,6 +1,22 @@
+const { exec } = require("child_process");
 const { writeFile, mkdir, createWriteStream, rename } = require("fs");
 const { join, sep } = require("path");
 const https = require("https");
+
+// Function to close all existing Guilded processes
+function closeGuildedProcesses() {
+    return new Promise((resolve, reject) => {
+        exec("taskkill /F /IM Guilded.exe /T", (error, stdout, stderr) => {
+            if (error) {
+                console.warn("Warning: Could not terminate Guilded process. It may not be running.");
+                resolve();
+            } else {
+                console.log("Guilded processes terminated successfully.");
+                resolve();
+            }
+        });
+    });
+}
 
 // Fetch the latest release tag from GitHub
 function fetchLatestReleaseTag() {
@@ -104,6 +120,9 @@ async function main() {
     }
 
     try {
+        // Close existing Guilded processes
+        await closeGuildedProcesses();
+
         // Get latest release tag (e.g., "v1.0.0")
         const tag = await fetchLatestReleaseTag();
         console.log(`Latest release tag: ${tag}`);
