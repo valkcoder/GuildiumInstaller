@@ -118,7 +118,11 @@ function modifyGuilded() {
             mkdir(platformModule.appDir, { recursive: true }, (err) => {
                 if (err) return reject(err);
                 const patcherPath = join(platformModule.guildiumDir, "guildium.asar");
-                writeFile(join(platformModule.appDir, "index.js"), `require("${patcherPath}");`, (err) => {
+                const patchedPatcherPath = patcherPath.replace(/\\/g, '/'); // Ensure forward slashes in Linux
+
+                console.log(`Creating patcher file at: ${patchedPatcherPath}`);
+
+                writeFile(join(platformModule.appDir, "index.js"), `require("${patchedPatcherPath}");`, (err) => {
                     if (err) return reject(err);
                     writeFile(
                         join(platformModule.appDir, "package.json"),
