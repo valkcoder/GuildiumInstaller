@@ -1,19 +1,36 @@
 const { exec } = require("child_process");
-const { writeFile, mkdir, createWriteStream, rename } = require("fs");
-const { join, sep } = require("path");
+const { writeFile, mkdir, createWriteStream, rename, existsSync } = require("fs");
+const { join } = require("path");
 const https = require("https");
+const os = require("os");
 
 // Function to close all existing Guilded processes
 function closeGuildedProcesses() {
-    return new Promise((resolve, reject) => {
-        exec("taskkill /F /IM Guilded.exe /T", (error, stdout, stderr) => {
+    return new Promise((resolve) => {
+        let command;
+        switch (os.platform()) {
+            case "win32":
+                command = "taskkill /F /IM Guilded.exe /T";
+                break;
+            case "darwin":
+                command = "pkill -f Guilded";
+                break;
+            case "linux":
+                command = "pkill -f Guilded";
+                break;
+            default:
+                console.warn("Unsupported OS for process termination.");
+                resolve();
+                return;
+        }
+
+        exec(command, (error) => {
             if (error) {
                 console.warn("Warning: Could not terminate Guilded process. It may not be running.");
-                resolve();
             } else {
                 console.log("Guilded processes terminated successfully.");
-                resolve();
             }
+            resolve();
         });
     });
 }
@@ -47,7 +64,6 @@ function downloadFile(url, destPath) {
     return new Promise((resolve, reject) => {
         const file = createWriteStream(destPath);
         https.get(url, (response) => {
-            // Follow redirect if necessary
             if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 file.close();
                 return downloadFile(response.headers.location, destPath).then(resolve).catch(reject);
@@ -63,14 +79,41 @@ function downloadFile(url, destPath) {
     });
 }
 
+// Get platform-specific paths
+function getPlatformModule() {
+    const platform = os.platform();
+    let appDir, resourcesDir, guildiumDir;
+
+    switch (platform) {
+        case "win32":
+            appDir = join(process.env.LOCALAPPDATA, "Programs", "Guilded", "Resources", "app");
+            resourcesDir = join(process.env.LOCALAPPDATA, "Programs", "Guilded", "Resources");
+            guildiumDir = join(process.env.ProgramW6432 || "C:\\Program Files", "Guildium");
+            break;
+        case "darwin":
+            appDir = "/Applications/Guilded.app/Contents/Resources/app";
+            resourcesDir = "/Applications/Guilded.app/Contents/Resources";
+            guildiumDir = "/Applications/Guildium";
+            break;
+        case "linux":
+            appDir = "/opt/Guilded/resources/app";
+            resourcesDir = "/opt/Guilded/resources";
+            guildiumDir = "/usr/local/share/Guildium";
+            break;
+        default:
+            throw new Error("Unsupported operating system");
+    }
+
+    return { appDir, resourcesDir, guildiumDir };
+}
+
 // Modify Guilded's installation to reference guildium.asar
 function modifyGuilded(platformModule) {
     return Promise.all([
-        // Step 1: Create the "app" directory and write index.js and package.json
         new Promise((resolve, reject) => {
-            mkdir(platformModule.appDir, (err) => {
+            mkdir(platformModule.appDir, { recursive: true }, (err) => {
                 if (err) return reject(err);
-                const patcherPath = join(platformModule.guildiumDir, "guildium.asar").replace(RegExp(sep.repeat(2), "g"), "/");
+                const patcherPath = join(platformModule.guildiumDir, "guildium.asar").replace(/\\/g, "/");
                 writeFile(join(platformModule.appDir, "index.js"), `require("${patcherPath}");`, (err) => {
                     if (err) return reject(err);
                     writeFile(
@@ -84,9 +127,8 @@ function modifyGuilded(platformModule) {
                 });
             });
         }),
-        // Step 2: Move app.asar and app.asar.unpacked to _guilded
         new Promise((resolve, reject) => {
-            mkdir(join(platformModule.resourcesDir, "_guilded"), (err) => {
+            mkdir(join(platformModule.resourcesDir, "_guilded"), { recursive: true }, (err) => {
                 if (err) return reject(err);
                 const _guildedPath = join(platformModule.resourcesDir, "_guilded");
                 rename(join(platformModule.resourcesDir, "app.asar"), join(_guildedPath, "app.asar"), (err) => {
@@ -105,38 +147,28 @@ function modifyGuilded(platformModule) {
     ]);
 }
 
-// Main function that ties everything together
+// Main function
 async function main() {
-    const platformModule = {
-        appDir: process.env.LOCALAPPDATA + "\\Programs\\Guilded\\Resources\\app",
-        resourcesDir: process.env.LOCALAPPDATA + "\\Programs\\Guilded\\Resources",
-        guildiumDir: "C:\\Program Files\\Guildium"
-    };
-
-    // Ensure guildiumDir exists
-    const fs = require("fs");
-    if (!fs.existsSync(platformModule.guildiumDir)) {
-        fs.mkdirSync(platformModule.guildiumDir, { recursive: true });
-    }
-
     try {
-        // Close existing Guilded processes
-        await closeGuildedProcesses();
+        const platformModule = getPlatformModule();
 
-        // Get latest release tag (e.g., "v1.0.0")
+        if (!existsSync(platformModule.guildiumDir)) {
+            mkdir(platformModule.guildiumDir, { recursive: true }, (err) => {
+                if (err) throw new Error("Failed to create Guildium directory.");
+            });
+        }
+
+        await closeGuildedProcesses();
         const tag = await fetchLatestReleaseTag();
         console.log(`Latest release tag: ${tag}`);
 
-        // Build download URL using the tag
         const downloadUrl = `https://github.com/valkcoder/Guildium/releases/download/${tag}/guildium.asar`;
         console.log(`Downloading guildium.asar from ${downloadUrl}...`);
 
-        // Download guildium.asar to the designated folder
         const guildiumAsarPath = join(platformModule.guildiumDir, "guildium.asar");
         await downloadFile(downloadUrl, guildiumAsarPath);
         console.log("Download completed, proceeding to modify Guilded...");
 
-        // Modify Guilded installation
         await modifyGuilded(platformModule);
         console.log("Guilded installation modified successfully!");
     } catch (err) {
