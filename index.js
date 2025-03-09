@@ -37,10 +37,15 @@ if (!platform) {
 
 // Construct paths
 const platformModule = {
-    appDir: join(platform.guildedDir, "Resources", "app"),
+    appDir: join(platform.guildedDir, "Resources", "app"), // join for cross-platform compatibility
     resourcesDir: join(platform.guildedDir, "Resources"),
     guildiumDir: platform.guildiumDir,
 };
+
+// If platform is Linux, ensure the correct path is used
+if (platformKey === 'linux') {
+    platformModule.guildedDir = '/opt/Guilded';
+}
 
 // Ensure guildiumDir exists
 if (!existsSync(platformModule.guildiumDir)) {
@@ -67,7 +72,7 @@ function closeGuildedProcesses() {
     });
 }
 
-// Fetch the latest release tag from GitHub
+// Fetch the latest release tag
 function fetchLatestReleaseTag() {
     return new Promise((resolve, reject) => {
         https.get("https://api.github.com/repos/valkcoder/Guildium/releases/latest", {
@@ -118,11 +123,7 @@ function modifyGuilded() {
             mkdir(platformModule.appDir, { recursive: true }, (err) => {
                 if (err) return reject(err);
                 const patcherPath = join(platformModule.guildiumDir, "guildium.asar");
-                const patchedPatcherPath = patcherPath.replace(/\\/g, '/'); // Ensure forward slashes in Linux
-
-                console.log(`Creating patcher file at: ${patchedPatcherPath}`);
-
-                writeFile(join(platformModule.appDir, "index.js"), `require("${patchedPatcherPath}");`, (err) => {
+                writeFile(join(platformModule.appDir, "index.js"), `require("${patcherPath.replace(/\\/g, '\\\\')}");`, (err) => {
                     if (err) return reject(err);
                     writeFile(
                         join(platformModule.appDir, "package.json"),
@@ -135,23 +136,6 @@ function modifyGuilded() {
                 });
             });
         }),
-        new Promise((resolve, reject) => {
-            const _guildedPath = join(platformModule.resourcesDir, "_guilded");
-            mkdir(_guildedPath, { recursive: true }, (err) => {
-                if (err) return reject(err);
-                rename(join(platformModule.resourcesDir, "app.asar"), join(_guildedPath, "app.asar"), (err) => {
-                    if (err) return reject(err);
-                    rename(
-                        join(platformModule.resourcesDir, "app.asar.unpacked"),
-                        join(_guildedPath, "app.asar.unpacked"),
-                        (err) => {
-                            if (err) return reject(err);
-                            resolve();
-                        }
-                    );
-                });
-            });
-        })
     ]);
 }
 
@@ -183,3 +167,6 @@ async function main() {
 }
 
 main();
+
+// Keep the program open
+process.stdin.resume();
